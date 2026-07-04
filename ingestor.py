@@ -2,23 +2,13 @@ import os
 import io
 import sys
 import json
-import dotenv
 import logging
 import pandas as pd
 from pypdf import PdfReader
-from langchain_neo4j import Neo4jGraph
-from langchain_ollama import ChatOllama
 from langchain_core.documents import Document
+from utils.graph_ingestor import ingest_to_graph
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_experimental.graph_transformers import LLMGraphTransformer
 
-dotenv.load_dotenv()
-
-# Here comes the env variables
-NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
-NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-OLLAMA_MODEL_NAME_GRAPH = os.getenv("OLLAMA_MODEL_NAME_GRAPH")
 
 
 # Here is the logging framework
@@ -31,14 +21,7 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-def get_db_connection():
-    """Create and return a Neo4jGraph connection using the environment variables."""
-    logger.info(f"Connecting to Neo4j graph database at {NEO4J_URI}...")
-    return Neo4jGraph(
-        url=NEO4J_URI,
-        username=NEO4J_USERNAME,
-        password=NEO4J_PASSWORD
-    )
+
 
 def extract_text_from_file(uploaded_file) -> str:
     """Extract string content from a Streamlit UploadedFile object based on its extension."""
@@ -87,16 +70,8 @@ def ingest_documents(uploaded_files):
         logger.warning("No files provided for ingestion.")
         return {"success": False, "error": "No files provided"}
         
-    logger.info(f"Starting ingestion process for {len(uploaded_files)} file(s).")
+    logger.info(f"Starting graph ingestion process for {len(uploaded_files)} file(s).")
 
-    # Initialize LLM 
-    llm = ChatOllama(
-        model=OLLAMA_MODEL_NAME_GRAPH,
-        temperature=0
-    )
-
-    graph = get_db_connection()
-    transformer = LLMGraphTransformer(llm=llm)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
 
     all_chunks = []
@@ -134,21 +109,14 @@ def ingest_documents(uploaded_files):
         return {"success": False, "error": "No text content could be extracted from the files"}
 
     try:
-        logger.info(f"Converting {len(all_chunks)} total text chunks into graph documents using Ollama LLM '{OLLAMA_MODEL_NAME_GRAPH}'...")
-        # Convert chunks to Graph Documents
-        graph_docs = transformer.convert_to_graph_documents(all_chunks)
-        logger.info(f"Graph conversion complete. Extracted {len(graph_docs)} graph document(s).")
-        
-        # Save to Graph Database
-        logger.info("Adding graph documents to Neo4j graph...")
-        graph.add_graph_documents(graph_docs, baseEntityLabel=True, include_source=True)
-        logger.info("Successfully loaded graph documents into Neo4j database.")
+        logger.info("Starting Graph Ingestion")
+        graph_doc_count = ingest_to_graph(all_chunks)
 
         return {
             "success": True,
             "file_metadata": file_metadata,
             "total_chunks": len(all_chunks),
-            "graph_documents": len(graph_docs)
+            "graph_documents": graph_doc_count
         }
 
     except Exception as e:
