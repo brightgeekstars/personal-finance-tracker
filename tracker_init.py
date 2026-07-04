@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from utils.graph_ingestor import get_db_connection, NEO4J_URI
 from ingestor import ingest_documents
 from retriever import HybridRetriever
@@ -328,6 +329,9 @@ with tab_chat:
                 if msg["role"] == "assistant" and msg.get("metadata"):
                     meta = msg["metadata"]
                     with st.expander(f"🔍 Retrieval details — mode: **{meta['mode']}**", expanded=False):
+                        if meta.get("rewritten_query"):
+                            st.caption(f"🔄 Interpreted as: *{meta['rewritten_query']}*")
+                            st.divider()
                         for r in meta.get("results", []):
                             st.caption(f"[{r['retriever'].upper()}] {r['source']}  (score: {r['score']})")
                             st.text(r["text"][:300] + ("…" if len(r["text"]) > 300 else ""))
@@ -345,11 +349,15 @@ with tab_chat:
             with st.spinner("Thinking…"):
                 try:
                     retriever = get_retriever()
-                    result = retriever.retrieve(user_query)
+                    result = retriever.retrieve(
+                        user_query,
+                        chat_history=st.session_state.chat_history,
+                    )
                     answer = result["answer"]
                     metadata = {
                         "mode": result["mode"],
                         "results": result["results"],
+                        "rewritten_query": result.get("rewritten_query"),
                     }
                 except Exception as e:
                     answer = f"Sorry, I encountered an error: {e}"
@@ -359,6 +367,9 @@ with tab_chat:
 
             if metadata:
                 with st.expander(f"🔍 Retrieval details — mode: **{metadata['mode']}**", expanded=False):
+                    if metadata.get("rewritten_query"):
+                        st.caption(f"🔄 Interpreted as: *{metadata['rewritten_query']}*")
+                        st.divider()
                     for r in metadata.get("results", []):
                         st.caption(f"[{r['retriever'].upper()}] {r['source']}  (score: {r['score']})")
                         st.text(r["text"][:300] + ("…" if len(r["text"]) > 300 else ""))
@@ -536,9 +547,91 @@ with tab_graph:
 
     except Exception as e:
         st.error(f"Could not fetch graph stats: {e}")
+    # Graph Visualization
+    st.markdown('<br>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Graph Visualization</div>', unsafe_allow_html=True)
+
+    if node_count > 0:
+        try:
+            from pyvis.network import Network
+            import tempfile
+            import os
+
+            # Query entity nodes and relationships (limited for performance)
+            vis_data = graph.query("""
+                MATCH (e:__Entity__)
+                WITH e LIMIT 150
+                OPTIONAL MATCH (e)-[r]-(neighbor:__Entity__)
+                RETURN
+                    e.id AS source_id,
+                    labels(e) AS source_labels,
+                    type(r) AS rel_type,
+                    neighbor.id AS target_id,
+                    labels(neighbor) AS target_labels
+            """)
+
+            if vis_data:
+                # Color palette for different node labels
+                label_colors = {
+                    "Person": "#6366f1", "Organization": "#8b5cf6",
+                    "Account": "#06b6d4", "Bank": "#0ea5e9",
+                    "Vendor": "#f59e0b", "Category": "#10b981",
+                    "Transaction": "#ef4444", "Product": "#ec4899",
+                }
+                default_color = "#a78bfa"
+
+                net = Network(
+                    height="500px", width="100%",
+                    bgcolor="#0e1117", font_color="#e2e8f0",
+                    directed=True,
+                )
+                net.barnes_hut(
+                    gravity=-3000, central_gravity=0.3,
+                    spring_length=120, spring_strength=0.05,
+                )
+
+                added_nodes = set()
+                for rec in vis_data:
+                    # Add source node
+                    src_id = rec["source_id"]
+                    if src_id and src_id not in added_nodes:
+                        src_labels = [l for l in (rec.get("source_labels") or []) if l != "__Entity__"]
+                        label_name = src_labels[0] if src_labels else "Entity"
+                        color = label_colors.get(label_name, default_color)
+                        net.add_node(src_id, label=src_id, title=f"{src_id} ({label_name})", color=color, size=20)
+                        added_nodes.add(src_id)
+
+                    # Add target node and edge
+                    tgt_id = rec.get("target_id")
+                    if tgt_id and tgt_id not in added_nodes:
+                        tgt_labels = [l for l in (rec.get("target_labels") or []) if l != "__Entity__"]
+                        label_name = tgt_labels[0] if tgt_labels else "Entity"
+                        color = label_colors.get(label_name, default_color)
+                        net.add_node(tgt_id, label=tgt_id, title=f"{tgt_id} ({label_name})", color=color, size=20)
+                        added_nodes.add(tgt_id)
+
+                    if src_id and tgt_id and rec.get("rel_type"):
+                        net.add_edge(src_id, tgt_id, title=rec["rel_type"], label=rec["rel_type"], color="#475569")
+
+                # Render to a temp HTML file and display inline
+                tmp_dir = tempfile.mkdtemp()
+                tmp_path = os.path.join(tmp_dir, "graph.html")
+                net.save_graph(tmp_path)
+                with open(tmp_path, "r") as f:
+                    html_content = f.read()
+                components.html(html_content, height=520, scrolling=False)
+
+                st.caption(f"Showing {len(added_nodes)} entity nodes (max 150). Drag nodes to rearrange.")
+            else:
+                st.caption("No entity nodes found to visualize.")
+
+        except Exception as e:
+            st.warning(f"Could not render graph visualization: {e}")
+    else:
+        st.caption("Ingest some documents first to see the graph.")
 
     # Danger zone
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<br>', unsafe_allow_html=True)
     st.markdown("""
     <div class="danger-zone">
         <h4>⚠️ Danger Zone</h4>

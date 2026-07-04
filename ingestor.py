@@ -41,8 +41,31 @@ def extract_text_from_file(uploaded_file) -> str:
         return text
     elif filename.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_bytes))
-        text = df.to_string(index=False)
-        logger.info(f"Successfully parsed CSV '{uploaded_file.name}' with {len(df)} rows.")
+        logger.info(f"Successfully parsed CSV '{uploaded_file.name}' with {len(df)} rows, {len(df.columns)} columns.")
+
+        # Convert each row into a natural language sentence for better entity extraction.
+        # Example: "Row 1: Date is 2026-06-15, Amount is 1499, Vendor is Amazon."
+        columns = list(df.columns)
+        sentences = []
+        for idx, row in df.iterrows():
+            parts = ", ".join(
+                f"{col} is {row[col]}" for col in columns
+                if pd.notna(row[col])
+            )
+            sentences.append(f"Row {idx + 1}: {parts}.")
+
+        # Batch rows in groups of 5 to produce reasonably-sized chunks
+        batch_size = 5
+        batches = []
+        for i in range(0, len(sentences), batch_size):
+            batch = "\n".join(sentences[i:i + batch_size])
+            batches.append(batch)
+
+        text = "\n\n".join(batches)
+        logger.info(
+            f"Converted CSV '{uploaded_file.name}' to {len(sentences)} row-sentences "
+            f"in {len(batches)} batch(es)."
+        )
         return text
     elif filename.endswith(".json"):
         data = json.loads(file_bytes.decode("utf-8", errors="ignore"))

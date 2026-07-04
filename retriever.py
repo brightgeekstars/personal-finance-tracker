@@ -124,12 +124,31 @@ do NOT make up facts.
 When financial amounts or numbers are available from the GRAPH context, prefer those values — \
 they are precise and verified. Use the VECTOR context for narrative and descriptive details.
 
+Cite your sources inline when referencing specific data. Use the format [Source: filename] or \
+[Source: graph:entity:name] based on the source labels in the context. This helps the user \
+verify your answer.
+
 Keep your answer concise, well-structured, and easy to read.
 
 {context}
 
 User Question: {query}
 Answer:"""
+
+
+REWRITE_PROMPT = """\
+You are a query rewriter. Given the conversation history and a new follow-up message, \
+rewrite the follow-up message as a standalone question that can be understood without \
+the conversation history.
+
+If the follow-up is already a standalone question, return it as-is.
+Return ONLY the rewritten question — no explanation.
+
+Conversation history:
+{history}
+
+Follow-up message: {query}
+Standalone question:"""
 
 
 # ──────────────────────────────────────────────
@@ -486,10 +505,39 @@ class HybridRetriever:
 
         sections = []
         for i, r in enumerate(results, 1):
-            source_label = f"[{r['retriever'].upper()}] {r['source']}"
-            sections.append(f"--- Result {i} ({source_label}) ---\n{r['text']}")
+            source_tag = r['source']
+            retriever_tag = r['retriever'].upper()
+            sections.append(
+                f"--- Source {i} [{retriever_tag}] (Source: {source_tag}) ---\n{r['text']}"
+            )
 
         return "\n\n".join(sections)
+
+    def _rewrite_with_history(self, query: str, chat_history: list[dict]) -> str:
+        """
+        Rewrite a follow-up question as a standalone query using conversation history.
+
+        If there's no history or the query appears standalone, returns it as-is.
+        """
+        if not chat_history:
+            return query
+
+        # Use only the last 6 messages for context (3 exchanges)
+        recent = chat_history[-6:]
+        history_lines = []
+        for msg in recent:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            history_lines.append(f"{role}: {msg['content'][:200]}")
+
+        history_str = "\n".join(history_lines)
+        prompt = REWRITE_PROMPT.format(history=history_str, query=query)
+        response = self.llm.invoke(prompt)
+        rewritten = response.content.strip()
+
+        if rewritten:
+            logger.info(f"Rewritten query: {rewritten!r}")
+            return rewritten
+        return query
 
     def _generate_answer(self, query: str, context: str) -> str:
         """Generate a final answer using the retrieved context."""
@@ -501,7 +549,7 @@ class HybridRetriever:
     #  Public API
     # ──────────────────────────────────────────
 
-    def retrieve(self, query: str) -> dict:
+    def retrieve(self, query: str, chat_history: list[dict] | None = None) -> dict:
         """
         Full retrieval pipeline.
 
@@ -514,16 +562,23 @@ class HybridRetriever:
             Extract entities from query → graph precision lookup → answer (no vector)
 
         Args:
-            query: The user's natural language question.
+            query:        The user's natural language question.
+            chat_history: Optional list of {"role": ..., "content": ...} message dicts
+                          for resolving follow-up references.
 
         Returns:
             dict with keys:
-                - answer:       The generated answer string.
-                - mode:         The retrieval mode used.
-                - results:      The merged retrieval results (list of dicts).
-                - context:      The assembled context string fed to the LLM.
+                - answer:           The generated answer string.
+                - mode:             The retrieval mode used.
+                - results:          The merged retrieval results (list of dicts).
+                - context:          The assembled context string fed to the LLM.
+                - rewritten_query:  The standalone query after history rewrite (if any).
         """
         logger.info(f"Retrieving for query: {query!r}")
+
+        # Step 0 — Rewrite follow-up questions using conversation history
+        original_query = query
+        query = self._rewrite_with_history(query, chat_history or [])
 
         # Step 1 — Classify the query
         mode = self._classify_query(query)
@@ -577,4 +632,5 @@ class HybridRetriever:
             "mode": mode,
             "results": merged,
             "context": context,
+            "rewritten_query": query if query != original_query else None,
         }
