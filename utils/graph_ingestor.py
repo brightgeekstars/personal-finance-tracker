@@ -45,6 +45,14 @@ def ingest_to_graph(chunks):
     transformer = LLMGraphTransformer(llm=llm)
     graph_docs = transformer.convert_to_graph_documents(chunks)
 
+    # Log extracted nodes and relationships per document
+    for i, doc in enumerate(graph_docs):
+        nodes_str = ", ".join(f"{n.id} ({n.type})" for n in doc.nodes) or "none"
+        rels_str = ", ".join(
+            f"{r.source.id} -[{r.type}]-> {r.target.id}" for r in doc.relationships
+        ) or "none"
+        logger.info(f"GraphDoc {i}: nodes=[{nodes_str}] | relationships=[{rels_str}]")
+
     logger.info(f"Graph conversion complete. Extracted {len(graph_docs)} graph document(s).")
 
     graph.add_graph_documents(graph_docs, baseEntityLabel = True, include_source = True)
