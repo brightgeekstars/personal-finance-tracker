@@ -347,11 +347,14 @@ with tab_ingest:
                 st.write("**Phase 2 →** Extracting text and chunking…")
 
                 st.write("**Phase 3 →** Converting to graph documents and storing in Neo4j…")
+
+                st.write("**Phase 4 →** Embedding chunks and storing vectors in Neo4j…")
+
                 result = ingest_documents(valid_files)
 
                 if result.get("success"):
                     status.update(label="✅ Ingestion complete!", state="complete")
-                    st.write("**Phase 4 →** Done!")
+                    st.write("**Phase 5 →** Done!")
                 else:
                     status.update(label="❌ Ingestion failed", state="error")
                     st.error(result.get("error", "Unknown error"))
@@ -360,6 +363,7 @@ with tab_ingest:
             # Results
             total_chunks = result.get("total_chunks", "—")
             graph_docs = result.get("graph_documents", "—")
+            vector_chunks = result.get("vector_chunks", "—")
             st.markdown(f"""
             <div class="result-row">
                 <div class="result-card">
@@ -369,6 +373,10 @@ with tab_ingest:
                 <div class="result-card">
                     <div class="value">{graph_docs}</div>
                     <div class="label">Graph Documents</div>
+                </div>
+                <div class="result-card">
+                    <div class="value">{vector_chunks}</div>
+                    <div class="label">Vector Embeddings</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -441,6 +449,30 @@ with tab_graph:
             <div>{rels_html}</div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Vector index info
+        try:
+            vector_indexes = graph.query(
+                "SHOW INDEXES YIELD name, type, labelsOrTypes, properties "
+                "WHERE type = 'VECTOR' RETURN name, labelsOrTypes, properties"
+            )
+            if vector_indexes:
+                idx_html = ""
+                for idx in vector_indexes:
+                    idx_html += (
+                        f'<span class="tag">{idx["name"]}</span> '
+                        f'<span style="color:#64748b;font-size:0.78rem;">'
+                        f'on :{idx["labelsOrTypes"][0]}.{idx["properties"][0]}'
+                        f'</span><br>'
+                    )
+                st.markdown(f"""
+                <div class="info-card">
+                    <h4>Vector Indexes</h4>
+                    <div>{idx_html}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        except Exception:
+            pass  # SHOW INDEXES may not be available on all versions
 
     except Exception as e:
         st.error(f"Could not fetch graph stats: {e}")

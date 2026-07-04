@@ -7,6 +7,7 @@ import pandas as pd
 from pypdf import PdfReader
 from langchain_core.documents import Document
 from utils.graph_ingestor import ingest_to_graph
+from utils.vector_ingestor import ingest_to_vector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
@@ -61,7 +62,8 @@ def ingest_documents(uploaded_files):
     1. Extract text from each file.
     2. Split text into chunks.
     3. Convert to Graph Documents using LLMGraphTransformer.
-    4. Save to the Neo4j database.
+    4. Embed chunks and store as vectors in Neo4j.
+    5. Save to the Neo4j database.
     
     Returns a dictionary summarizing the results of the ingestion.
     """
@@ -112,11 +114,15 @@ def ingest_documents(uploaded_files):
         logger.info("Starting Graph Ingestion")
         graph_doc_count = ingest_to_graph(all_chunks)
 
+        logger.info("Starting Vector Ingestion")
+        vector_chunk_count = ingest_to_vector(all_chunks)
+
         return {
             "success": True,
             "file_metadata": file_metadata,
             "total_chunks": len(all_chunks),
-            "graph_documents": graph_doc_count
+            "graph_documents": graph_doc_count,
+            "vector_chunks": vector_chunk_count
         }
 
     except Exception as e:
