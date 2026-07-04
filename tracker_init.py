@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.graph_ingestor import get_db_connection, NEO4J_URI
 from ingestor import ingest_documents
+from retriever import HybridRetriever
 
 # --- Page Config ---
 st.set_page_config(
@@ -302,13 +303,72 @@ tab_chat, tab_ingest, tab_graph = st.tabs(["💬 Chat", "📥 Ingestion", "🗄�
 #  TAB — Chat
 # ═══════════════════════════════════════════
 with tab_chat:
-    st.markdown("""
-    <div class="chat-placeholder">
-        <div class="icon">💬</div>
-        <h3>Chat with your financial data</h3>
-        <p>This feature is coming soon. Ingest some documents first, then come back here to ask questions.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Lazy-init the retriever (cached so it's created once per session)
+    @st.cache_resource(show_spinner="Initializing retriever…")
+    def get_retriever():
+        return HybridRetriever()
+
+    # Session state for chat history
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Render existing messages
+    if not st.session_state.chat_history:
+        st.markdown("""
+        <div class="chat-placeholder">
+            <div class="icon">💬</div>
+            <h3>Chat with your financial data</h3>
+            <p>Ask questions about your ingested documents — try "What are my biggest expenses?" or "Show me transactions with Amazon".</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg["role"] == "assistant" and msg.get("metadata"):
+                    meta = msg["metadata"]
+                    with st.expander(f"🔍 Retrieval details — mode: **{meta['mode']}**", expanded=False):
+                        for r in meta.get("results", []):
+                            st.caption(f"[{r['retriever'].upper()}] {r['source']}  (score: {r['score']})")
+                            st.text(r["text"][:300] + ("…" if len(r["text"]) > 300 else ""))
+                            st.divider()
+
+    # Chat input
+    if user_query := st.chat_input("Ask about your finances…"):
+        # Display user message
+        st.session_state.chat_history.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
+        # Generate response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    retriever = get_retriever()
+                    result = retriever.retrieve(user_query)
+                    answer = result["answer"]
+                    metadata = {
+                        "mode": result["mode"],
+                        "results": result["results"],
+                    }
+                except Exception as e:
+                    answer = f"Sorry, I encountered an error: {e}"
+                    metadata = None
+
+            st.markdown(answer)
+
+            if metadata:
+                with st.expander(f"🔍 Retrieval details — mode: **{metadata['mode']}**", expanded=False):
+                    for r in metadata.get("results", []):
+                        st.caption(f"[{r['retriever'].upper()}] {r['source']}  (score: {r['score']})")
+                        st.text(r["text"][:300] + ("…" if len(r["text"]) > 300 else ""))
+                        st.divider()
+
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": answer,
+            "metadata": metadata,
+        })
 
 
 # ═══════════════════════════════════════════
