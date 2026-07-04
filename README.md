@@ -60,7 +60,7 @@ OLLAMA_MODEL_NAME_EMBED="nomic-embed-text"
 ### Run the app
 
 ```bash
-streamlit run tracker_init.py
+sh startup.sh
 ```
 
 The app will open in your browser. Head to the **Ingestion** tab to upload documents, then switch to the **Chat** tab to start asking questions.
