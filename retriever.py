@@ -287,6 +287,9 @@ class HybridRetriever:
             })
 
         logger.info(f"Vector search returned {len(formatted)} result(s).")
+        for i, r in enumerate(formatted):
+            preview = r['text'][:150].replace('\n', ' ')
+            logger.info(f"  [VECTOR {i}] source={r['source']} | score={r['score']} | {preview}…")
         return formatted
 
     # ──────────────────────────────────────────
@@ -394,6 +397,9 @@ class HybridRetriever:
                                     triples.append(f"{rec['entity']} (entity, no connections)")
 
                     if triples:
+                        logger.info(f"  [GRAPH] Entity '{entity}' — {len(triples)} relationship(s) found:")
+                        for t in triples:
+                            logger.info(f"    ↳ {t}")
                         all_results.append({
                             "text": "\n".join(triples),
                             "source": f"graph:entity:{entity}",
