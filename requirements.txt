@@ -1,0 +1,10 @@
+dotenv==0.9.9
+pypdf==6.14.2
+pandas==3.0.3
+langchain-neo4j==0.10.0
+langchain-core==1.4.8
+langchain-experimental==0.4.2
+langchain-ollama==1.1.0
+streamlit==1.58.0
+cryptography==49.0.0
+pyvis==0.3.2
